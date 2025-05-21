@@ -1,6 +1,6 @@
 # core/serializers.py
 from rest_framework import serializers
-from .models import Ambiente, Estado, Bandeira, Aparelho, HistoricoConsumo, ContadorEnergia
+from .models import Ambiente, Estado, Bandeira, Aparelho, HistoricoConsumo, ConsumoMensal, LeituraOCR
 
 
 class AmbienteSerializer(serializers.ModelSerializer):
@@ -70,7 +70,62 @@ class HistoricoConsumoSerializer(serializers.ModelSerializer):
 
 #-----------Medidor------------#
 
-class ContadorEnergiaSerializer(serializers.ModelSerializer):
+class ConsumoMensalSerializer(serializers.ModelSerializer):
+    estado_nome = serializers.CharField(source='estado.nome', read_only=True)
+    bandeira_cor = serializers.CharField(source='bandeira.cor', read_only=True)
+
     class Meta:
-        model = ContadorEnergia
-        fields = '__all__'
+        model = ConsumoMensal
+        fields = [
+            'id', 'ano', 'mes', 'estado', 'estado_nome',
+            'bandeira', 'bandeira_cor', 'tarifa_social',
+            'leitura_inicial', 'leitura_final', 'consumo_kwh',
+            'total_pagar', 'criado_em', 'atualizado_em'
+        ]
+
+#--------------OCR-----------#
+
+class LeituraOCRSerializer(serializers.ModelSerializer):
+    estado = EstadoSerializer(read_only=True)
+    bandeira = BandeiraSerializer(read_only=True)
+    estado_id = serializers.PrimaryKeyRelatedField(queryset=Estado.objects.all(), source='estado', write_only=True)
+    bandeira_id = serializers.PrimaryKeyRelatedField(queryset=Bandeira.objects.all(), source='bandeira', write_only=True)
+    imagem_url = serializers.SerializerMethodField()
+    custo_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LeituraOCR
+        fields = [
+            'id', 'valor_extraido', 'valor_corrigido', 'estado', 'bandeira',
+            'tarifa_social', 'data_registro', 'estado_id', 'bandeira_id',
+            'imagem', 'imagem_url', 'consumo_entre_leituras', 'custo_total'
+        ]
+        extra_kwargs = {'imagem': {'write_only': True}}
+
+    def get_imagem_url(self, obj):
+        request = self.context.get('request')
+        if obj.imagem and request:
+            return request.build_absolute_uri(obj.imagem.url)
+        return None
+
+    def get_custo_total(self, obj):
+        return obj.custo_total()
+
+    def create(self, validated_data):
+        leitura = LeituraOCR.objects.create(**validated_data)
+
+        leituras_anteriores = LeituraOCR.objects.filter(
+            estado=leitura.estado,
+            data_registro__lt=leitura.data_registro
+        ).order_by('-data_registro')
+
+        if leituras_anteriores.exists():
+            ultima = leituras_anteriores.first()
+            leitura.consumo_entre_leituras = leitura.valor_corrigido - ultima.valor_corrigido
+            if leitura.consumo_entre_leituras < 0:
+                leitura.consumo_entre_leituras = None
+        else:
+            leitura.consumo_entre_leituras = None
+
+        leitura.save()
+        return leitura

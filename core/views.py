@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from rest_framework.views import APIView
 import json
 from django.http import JsonResponse
-from .models import Ambiente, Aparelho, HistoricoConsumo, Estado, Bandeira, TarifaSocial, ContadorEnergia
+from .models import Ambiente, Aparelho, HistoricoConsumo, Estado, Bandeira, TarifaSocial, ConsumoMensal, LeituraOCR
 from django.db.models import Sum
 from rest_framework import viewsets, generics, status
 from rest_framework.response import Response
@@ -12,7 +12,7 @@ from rest_framework.decorators import action, api_view
 from .serializers import (
     AmbienteSerializer, EstadoSerializer,
     BandeiraSerializer, AparelhoSerializer,
-    HistoricoConsumoSerializer, ContadorEnergiaSerializer
+    HistoricoConsumoSerializer, ConsumoMensalSerializer, LeituraOCRSerializer
 )
 from decimal import Decimal
 from django.views.decorators.csrf import csrf_exempt
@@ -21,6 +21,10 @@ import google.generativeai as genai
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 import json
+from rest_framework.parsers import MultiPartParser, FormParser
+import pytesseract
+from PIL import Image
+
 
 # Configuração da API Gemini
 genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -426,79 +430,152 @@ def dicas_economia(request):
 #---------Medidor----------#
 
 @api_view(['GET', 'POST'])
-def contador_energia_view(request):
+def consumo_mensal_view(request):
     if request.method == 'POST':
         dados = request.data
 
-        data_registro_str = dados.get('data_registro')
-        if data_registro_str:
-            try:
-                data_registro = datetime.strptime(data_registro_str, '%Y-%m-%d')
-            except ValueError:
-                return Response({'error': 'Formato inválido para data_registro'}, status=400)
-        else:
-            data_registro = None
+        data_registro = dados.get('data')
+        if not data_registro:
+            return Response({'error': 'Campo data é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            data_dt = datetime.strptime(data_registro, '%Y-%m-%d')
+            ano = data_dt.year
+            mes = data_dt.month
+        except Exception:
+            return Response({'error': 'Formato da data inválido. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        leitura_anterior = Decimal(dados.get('leitura_anterior', 0))
-        leitura_atual = Decimal(dados.get('leitura_atual', 0))
+        leitura_inicial = dados.get('leitura_inicial')
+        leitura_final = dados.get('leitura_final')
+        try:
+            leitura_inicial = Decimal(leitura_inicial)
+            leitura_final = Decimal(leitura_final)
+        except Exception:
+            return Response({'error': 'Leituras inválidas.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if leitura_atual < leitura_anterior:
-            return Response({'error': 'Leitura atual menor que a anterior'}, status=400)
-
-        consumo = leitura_atual - leitura_anterior
+        if leitura_final < leitura_inicial:
+            return Response({'error': 'Leitura final não pode ser menor que inicial.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             estado = Estado.objects.get(id=dados.get('estado'))
             bandeira = Bandeira.objects.get(id=dados.get('bandeira'))
         except (Estado.DoesNotExist, Bandeira.DoesNotExist):
-            return Response({'error': 'Estado ou Bandeira inválidos'}, status=400)
+            return Response({'error': 'Estado ou Bandeira inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        tarifa_base = estado.tarifa.valor_kwh  # valor_kwh do estado
-        valor_adicional = bandeira.valor_adicional  # adicional da bandeira
-        tarifa_total = tarifa_base + valor_adicional
+        tarifa_social = dados.get('tarifa_social', False)
 
-        custo_normal = consumo * tarifa_total
-
-        # Aqui você pode chamar sua função real para tarifa social ou manter fixo
-        tarifa_social = Decimal('0.7')  # Exemplo fixo
-        if dados.get('tarifa_social', False):
-            custo_final = consumo * tarifa_social
-        else:
-            custo_final = custo_normal
-
-        registro = ContadorEnergia.objects.create(
-            estado=estado.nome,
-            bandeira=bandeira.cor,
-            tarifa_social=dados.get('tarifa_social', False),
-            consumo_kwh=consumo,
-            total_pagar=custo_final,
-            data_registro=data_registro
+        consumo = ConsumoMensal(
+            ano=ano,
+            mes=mes,
+            estado=estado,
+            bandeira=bandeira,
+            tarifa_social=tarifa_social,
+            leitura_inicial=leitura_inicial,
+            leitura_final=leitura_final
         )
+        consumo.save()
 
-        serializer = ContadorEnergiaSerializer(registro)
-        return Response(serializer.data, status=201)
+        serializer = ConsumoMensalSerializer(consumo)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    registros = ContadorEnergia.objects.all().order_by('-data_registro')
-    serializer = ContadorEnergiaSerializer(registros, many=True)
+    # GET - lista todos os consumos ordenados
+    consumos = ConsumoMensal.objects.all().order_by('-ano', '-mes')
+    serializer = ConsumoMensalSerializer(consumos, many=True)
     return Response(serializer.data)
 
 
-@api_view(['GET'])
-def monitoramento_contador(request):
-    registros = ContadorEnergia.objects.all()
-    estados = [r.estado for r in registros]
-    consumos = [float(r.consumo_kwh) for r in registros]
-    totais = [float(r.total_pagar) for r in registros]
-    return Response({'estados': estados, 'consumos': consumos, 'totais': totais})
-
-
 @csrf_exempt
-def deletar_registro_contador(request, pk):
+def deletar_consumo_mensal(request, pk):
     if request.method == 'POST':
         try:
-            registro = ContadorEnergia.objects.get(pk=pk)
-            registro.delete()
+            consumo = ConsumoMensal.objects.get(pk=pk)
+            consumo.delete()
             return JsonResponse({'status': 'success'})
-        except ContadorEnergia.DoesNotExist:
+        except ConsumoMensal.DoesNotExist:
             return JsonResponse({'status': 'not_found'}, status=404)
     return JsonResponse({'status': 'invalid'}, status=400)
+
+@api_view(['GET'])
+def resultados_contador(request):
+    ano = request.GET.get('ano')
+    mes = request.GET.get('mes')
+
+    registros = ConsumoMensal.objects.all()
+
+    if ano:
+        try:
+            ano_int = int(ano)
+            registros = registros.filter(ano=ano_int)
+        except ValueError:
+            pass  # Ignora filtro inválido
+
+    if mes:
+        try:
+            mes_int = int(mes)
+            registros = registros.filter(mes=mes_int)
+        except ValueError:
+            pass  # Ignora filtro inválido
+
+    registros = registros.order_by('-ano', '-mes')
+    serializer = ConsumoMensalSerializer(registros, many=True)
+
+    consumo_total = registros.aggregate(total=Sum('consumo_kwh'))['total'] or Decimal('0')
+    custo_total = registros.aggregate(total=Sum('total_pagar'))['total'] or Decimal('0')
+
+    meses_registrados = registros.count() or 1
+    consumo_anual_estimado = (consumo_total / meses_registrados) * 12
+    custo_anual_estimado = (custo_total / meses_registrados) * 12
+
+    return Response({
+        'registros': serializer.data,
+        'consumo_total': consumo_total,
+        'custo_total': custo_total,
+        'consumo_anual_estimado': consumo_anual_estimado,
+        'custo_anual_estimado': custo_anual_estimado
+    })
+
+
+@api_view(['GET'])
+def grafico_contador(request):
+    # Buscar todos os registros do consumo mensal
+    registros = ConsumoMensal.objects.all().order_by('ano', 'mes')
+
+    # Criar as labels para o gráfico no formato MM/AAAA
+    labels = [f"{r.mes:02d}/{r.ano}" for r in registros]
+
+    # Extrair o consumo mensal (kWh) e o total pago (R$)
+    consumos = [float(r.consumo_kwh or 0) for r in registros]
+    custos = [float(r.total_pagar or 0) for r in registros]
+
+    # Retornar os dados formatados para o frontend
+    return Response({
+        'labels': labels,
+        'consumos': consumos,
+        'custos': custos,
+    })
+
+#--------------OCR-----------#
+
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\TesseractOCR\tesseract.exe'
+
+class LeituraOCRViewSet(viewsets.ModelViewSet):
+    queryset = LeituraOCR.objects.all().order_by('-data_registro')
+    serializer_class = LeituraOCRSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context.update({"request": self.request})
+        return context
+
+class OCRView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, *args, **kwargs):
+        imagem_file = request.data.get('imagem')
+        if not imagem_file:
+            return Response({'error': 'Nenhuma imagem enviada.'}, status=400)
+        try:
+            image = Image.open(imagem_file)
+            texto = pytesseract.image_to_string(image, lang='por')
+            return Response({'texto': texto})
+        except Exception as e:
+            return Response({'error': f'Erro ao processar imagem: {str(e)}'}, status=500)

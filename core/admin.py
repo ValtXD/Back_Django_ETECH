@@ -3,7 +3,7 @@ from django.utils.html import format_html
 from .models import (
     Ambiente, Estado, Tarifa, Bandeira,
     TarifaSocial, Aparelho, HistoricoConsumo,
-    ConfiguracaoSistema, ContadorEnergia
+    ConfiguracaoSistema, ConsumoMensal, LeituraOCR
 )
 
 class AmbienteAdmin(admin.ModelAdmin):
@@ -216,9 +216,49 @@ admin.site.index_title = "Painel de Controle"
 
 #----------------Medidor---------------#
 
-@admin.register(ContadorEnergia)
-class ContadorEnergiaAdmin(admin.ModelAdmin):
-    list_display = ('data_registro', 'estado', 'bandeira', 'tarifa_social', 'consumo_kwh', 'total_pagar')
-    list_filter = ('estado', 'bandeira', 'tarifa_social')
-    search_fields = ('estado',)
+@admin.register(ConsumoMensal)
+class ConsumoMensalAdmin(admin.ModelAdmin):
+    list_display = ('ano', 'mes', 'estado', 'bandeira', 'tarifa_social', 'consumo_kwh', 'total_pagar')
+    list_filter = ('ano', 'mes', 'estado', 'bandeira', 'tarifa_social')
+    search_fields = ('estado__nome', 'bandeira__cor')
+    ordering = ('-ano', '-mes')
+    date_hierarchy = 'criado_em'  # Se quiser hierarquia por data de criação
+
+#--------------OCR-----------#
+
+@admin.register(LeituraOCR)
+class LeituraOCRAdmin(admin.ModelAdmin):
+    list_display = (
+        'data_registro', 'estado', 'bandeira',
+        'valor_extraido', 'valor_corrigido',
+        'consumo_entre_leituras', 'tarifa_social', 'get_custo_total', 'imagem_preview'
+    )
+    list_filter = ('estado', 'bandeira', 'tarifa_social', 'data_registro')
+    search_fields = ('estado__nome', 'bandeira__cor')
     ordering = ('-data_registro',)
+    readonly_fields = ('data_registro', 'consumo_entre_leituras', 'get_custo_total', 'imagem_preview')
+
+    def get_custo_total(self, obj):
+        custo = obj.custo_total()
+        if custo is None:
+            return '-'
+        return f"R$ {custo:.2f}"
+    get_custo_total.short_description = 'Custo Estimado'
+
+    def imagem_preview(self, obj):
+        if obj.imagem:
+            return format_html('<img src="{}" width="100" />', obj.imagem.url)
+        return '-'
+    imagem_preview.short_description = 'Imagem'
+
+    def has_add_permission(self, request):
+        # Bloqueia criação manual pelo admin para evitar inconsistência
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # Permite edição se desejar, ou deixe False para só leitura
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+

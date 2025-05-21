@@ -2,7 +2,7 @@ from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 User = get_user_model()
 
@@ -325,13 +325,123 @@ class ConfiguracaoSistema(models.Model):
 
 #-----------------Medidor------------------#
 
-class ContadorEnergia(models.Model):
-    data_registro = models.DateTimeField(auto_now_add=False)
-    estado = models.CharField(max_length=100)
-    bandeira = models.CharField(max_length=50)
+class ConsumoMensal(models.Model):
+    ano = models.PositiveIntegerField()
+    mes = models.PositiveIntegerField()  # 1 a 12
+
+    estado = models.ForeignKey('Estado', on_delete=models.PROTECT)
+    bandeira = models.ForeignKey('Bandeira', on_delete=models.PROTECT)
     tarifa_social = models.BooleanField(default=False)
-    consumo_kwh = models.DecimalField(max_digits=10, decimal_places=2)
-    total_pagar = models.DecimalField(max_digits=10, decimal_places=2)
+
+    leitura_inicial = models.DecimalField(max_digits=10, decimal_places=2)
+    leitura_final = models.DecimalField(max_digits=10, decimal_places=2)
+
+    consumo_kwh = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    total_pagar = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('ano', 'mes', 'estado', 'bandeira')
+        ordering = ['-ano', '-mes']
+
+    def calcular_consumo(self):
+        if self.leitura_final and self.leitura_inicial:
+            consumo = self.leitura_final - self.leitura_inicial
+            if consumo < 0:
+                consumo = Decimal('0')
+            return consumo
+        return Decimal('0')
+
+    def obter_desconto_tarifa_social(self, consumo):
+        faixa = None
+        try:
+            if consumo <= 30:
+                faixa = 'ate_30'
+            elif consumo <= 100:
+                faixa = '31_a_100'
+            elif consumo <= 220:
+                faixa = '101_a_220'
+            else:
+                faixa = 'acima_220'
+            tarifa_social_obj = TarifaSocial.objects.get(faixa_consumo=faixa)
+            desconto_pct = tarifa_social_obj.desconto_percentual / Decimal('100')
+            return desconto_pct
+        except TarifaSocial.DoesNotExist:
+            return Decimal('0')
+
+    def save(self, *args, **kwargs):
+        self.consumo_kwh = self.calcular_consumo()
+
+        tarifa_base = self.estado.tarifa.valor_kwh
+        adicional_bandeira = self.bandeira.valor_adicional
+        tarifa_total = tarifa_base + adicional_bandeira
+
+        custo_normal = self.consumo_kwh * tarifa_total
+
+        if self.tarifa_social:
+            desconto_pct = self.obter_desconto_tarifa_social(self.consumo_kwh)
+            custo_com_desconto = custo_normal * (Decimal('1') - desconto_pct)
+            self.total_pagar = custo_com_desconto.quantize(Decimal('0.01'))
+        else:
+            self.total_pagar = custo_normal.quantize(Decimal('0.01'))
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.estado} - {self.data_registro.strftime('%d/%m/%Y')}"
+        return f"Consumo {self.mes:02d}/{self.ano} - {self.estado.nome} - {self.bandeira.get_cor_display()}"
+
+#--------------OCR-----------#
+
+class LeituraOCR(models.Model):
+    valor_extraido = models.DecimalField(max_digits=10, decimal_places=2)
+    valor_corrigido = models.DecimalField(max_digits=10, decimal_places=2)
+    estado = models.ForeignKey(Estado, on_delete=models.PROTECT)
+    bandeira = models.ForeignKey(Bandeira, on_delete=models.PROTECT)
+    tarifa_social = models.BooleanField(default=False)
+    data_registro = models.DateTimeField(auto_now_add=True)
+    imagem = models.ImageField(upload_to='leituras_imagens/')
+
+    consumo_entre_leituras = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+
+    def custo_total(self):
+        if self.consumo_entre_leituras is None:
+            return None
+
+        tarifa = float(self.estado.tarifa.valor_kwh)
+        adicional = float(self.bandeira.valor_adicional)
+        consumo = float(self.consumo_entre_leituras)
+
+        custo_bruto = consumo * (tarifa + adicional)
+
+        if not self.tarifa_social:
+            return round(custo_bruto, 2)
+
+        desconto = self._obter_desconto_tarifa_social(consumo)
+
+        custo_liquido = custo_bruto * (1 - desconto / 100)
+
+        return round(custo_liquido, 2)
+
+    def _obter_desconto_tarifa_social(self, consumo_kwh: float) -> float:
+        """Busca a faixa correta da tarifa social baseada no consumo."""
+
+        faixa = None
+        if consumo_kwh <= 30:
+            faixa = 'ate_30'
+        elif 31 <= consumo_kwh <= 100:
+            faixa = '31_a_100'
+        elif 101 <= consumo_kwh <= 220:
+            faixa = '101_a_220'
+        else:
+            faixa = 'acima_220'
+
+        try:
+            tarifa_social_obj = TarifaSocial.objects.get(faixa_consumo=faixa)
+            return float(tarifa_social_obj.desconto_percentual)
+        except TarifaSocial.DoesNotExist:
+            return 0.0
+
+    def __str__(self):
+        return f"Leitura {self.valor_corrigido} kWh em {self.data_registro.date()}"
