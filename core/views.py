@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from rest_framework.views import APIView
 import json
 from django.http import JsonResponse
+
+from .filters import LeituraOCRFilter
 from .models import Ambiente, Aparelho, HistoricoConsumo, Estado, Bandeira, TarifaSocial, ConsumoMensal, LeituraOCR
 from django.db.models import Sum
 from rest_framework import viewsets, generics, status
@@ -24,7 +26,7 @@ import json
 from rest_framework.parsers import MultiPartParser, FormParser
 import pytesseract
 from PIL import Image
-
+from django_filters.rest_framework import DjangoFilterBackend
 
 # Configuração da API Gemini
 genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -560,6 +562,9 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\TesseractOCR\tesserac
 class LeituraOCRViewSet(viewsets.ModelViewSet):
     queryset = LeituraOCR.objects.all().order_by('-data_registro')
     serializer_class = LeituraOCRSerializer
+
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = LeituraOCRFilter
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

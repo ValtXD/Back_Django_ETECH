@@ -4,6 +4,8 @@ from rest_framework.routers import DefaultRouter
 #Esse core pode tá vermehlo, mas tá dando certo
 #Caso de erro, verifique -> energy_manager.core.views
 from core.views import AmbienteViewSet, EstadoViewSet, BandeiraViewSet, AparelhoViewSet, CalculoConsumoAPIView, ResultadosAPIView, monitoramento_api, dicas_economia, consumo_mensal_view, resultados_contador, grafico_contador, deletar_consumo_mensal, LeituraOCRViewSet, OCRView
+from django.conf import settings
+from django.conf.urls.static import static
 
 # Definindo as rotas dos ViewSets com o DefaultRouter
 router = DefaultRouter()
@@ -43,3 +45,6 @@ urlpatterns = [
     path('ocr/', OCRView.as_view(), name='ocr'),
 
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

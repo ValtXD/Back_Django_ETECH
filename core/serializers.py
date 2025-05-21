@@ -91,6 +91,7 @@ class LeituraOCRSerializer(serializers.ModelSerializer):
     estado_id = serializers.PrimaryKeyRelatedField(queryset=Estado.objects.all(), source='estado', write_only=True)
     bandeira_id = serializers.PrimaryKeyRelatedField(queryset=Bandeira.objects.all(), source='bandeira', write_only=True)
     imagem_url = serializers.SerializerMethodField()
+    tarifa_social = serializers.BooleanField()
     custo_total = serializers.SerializerMethodField()
 
     class Meta:
