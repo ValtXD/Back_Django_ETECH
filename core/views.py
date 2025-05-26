@@ -19,6 +19,7 @@ from .serializers import (
     AmbienteSerializer, EstadoSerializer,
     BandeiraSerializer, AparelhoSerializer,
     HistoricoConsumoSerializer, ConsumoMensalSerializer, LeituraOCRSerializer,
+    UserSerializer,
 
 )
 from decimal import Decimal
@@ -33,6 +34,7 @@ import pytesseract
 from PIL import Image
 from django_filters.rest_framework import DjangoFilterBackend
 import cv2
+from django.contrib.auth.models import User
 #from django.contrib.auth import get_user_model
 #from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -569,7 +571,7 @@ class OCRView(APIView):
         except Exception as e:
             return Response({'error': f'Erro ao processar imagem: {str(e)}'}, status=500)
 
-#--------------------------------------------------------------------------------------------#
+#--------------Gemini IA OCR-----------#
 GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyClP7PDzQR6AYg1hH7RZoNiZ-reoiQrNrs'
 
 
@@ -583,13 +585,13 @@ class OCRGeminiView(APIView):
             if not imagem_file:
                 return Response({'error': 'Nenhuma imagem enviada.'}, status=400)
 
-            if imagem_file.size > 4 * 1024 * 1024:  # 4MB max
+            if imagem_file.size > 4 * 1024 * 1024:  # 4MB max (TAMANHO da IMAGEM)
                 return Response({'error': 'Imagem muito grande. Tamanho máximo: 4MB.'}, status=400)
 
-            # Converter imagem para base64
+            # Converter imagem para base64 (IMPORTANTE OK?)
             imagem_b64 = base64.b64encode(imagem_file.read()).decode('utf-8')
 
-            # Estrutura da requisição para Gemini 2.0 Flash
+            # Estrutura da requisição para o Gemini
             payload = {
                 "contents": [
                     {
@@ -628,7 +630,6 @@ class OCRGeminiView(APIView):
 
             data = response.json()
 
-            # Processamento da resposta
             texto_gerado = data['candidates'][0]['content']['parts'][0]['text'].strip()
 
             # Extrair apenas números (ajuste o regex conforme necessário)
@@ -666,3 +667,9 @@ class OCRGeminiView(APIView):
 
 #class CustomTokenView(TokenObtainPairView):
 #    serializer_class = CustomTokenObtainPairSerializer
+
+#-------------------Login-Cadastro-Django--------------#
+class RegisterView(generics.CreateAPIView):
+    queryset = User.objects.all()
+    permission_classes = (permissions.AllowAny,)
+    serializer_class = UserSerializer

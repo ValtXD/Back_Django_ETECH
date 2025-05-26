@@ -445,7 +445,7 @@ class LeituraOCR(models.Model):
     def __str__(self):
         return f"Leitura {self.valor_corrigido} kWh em {self.data_registro.date()}"
 
-    #--------------------------Login_Cadastro-------------------#
+#--------------------------Login_Cadastro-------------------#
 
 #    class CustomUser(AbstractUser):
 #        email = models.EmailField(unique=True)

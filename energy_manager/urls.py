@@ -1,12 +1,16 @@
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-#Esse core pode tá vermehlo, mas tá dando certo
-#Caso de erro, verifique -> energy_manager.core.views
-from core.views import AmbienteViewSet, EstadoViewSet, BandeiraViewSet, AparelhoViewSet, CalculoConsumoAPIView, ResultadosAPIView, monitoramento_api, dicas_economia, resultados_contador, grafico_contador, LeituraOCRViewSet, OCRView, grafico_contador_anual, ConsumoMensalViewSet, OCRGeminiView
+#Esse core pode tá vermehlo, mas tá dando certo (pra mim)
+#Caso dê erro, verifique -> energy_manager.core.views (Depende do Interpretador)
+from core.views import AmbienteViewSet, EstadoViewSet, BandeiraViewSet, AparelhoViewSet, CalculoConsumoAPIView, ResultadosAPIView, monitoramento_api, dicas_economia, resultados_contador, grafico_contador, LeituraOCRViewSet, OCRView, grafico_contador_anual, ConsumoMensalViewSet, OCRGeminiView, RegisterView
 #from rest_framework_simplejwt.views import TokenRefreshView
 from django.conf import settings
 from django.conf.urls.static import static
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
 
 # Definindo as rotas dos ViewSets com o DefaultRouter
 router = DefaultRouter()
@@ -54,6 +58,11 @@ urlpatterns = [
     #path('register/', RegisterView.as_view(), name='register'),
     #path('login/', CustomTokenView.as_view(), name='token_obtain_pair'),
     #path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    #API para Login_Cadastro_Django
+    path('api/register/', RegisterView.as_view(), name='register'),
+    path('api/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
 ]
 

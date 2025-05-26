@@ -1,9 +1,11 @@
 # core/serializers.py
 from rest_framework import serializers
 from .models import Ambiente, Estado, Bandeira, Aparelho, HistoricoConsumo, ConsumoMensal, LeituraOCR, Tarifa
+from django.contrib.auth.models import User
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 from decimal import Decimal, InvalidOperation
+
 
 class AmbienteSerializer(serializers.ModelSerializer):
     class Meta:
@@ -163,7 +165,7 @@ class LeituraOCRSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-#-------------Gemini------------------#
+#-------------Gemini-OCR---------------#
 
     def validate_valor_extraido(self, value):
         try:
@@ -208,3 +210,20 @@ class LeituraOCRSerializer(serializers.ModelSerializer):
 #        token = super().get_token(user)
 #        token['username'] = user.username
 #        return token
+
+#-------------------Login-Cadastro-Django--------------#
+class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'password')
+
+    def create(self, validated_data):
+        user = User(
+            username=validated_data['username'],
+            email=validated_data['email'],
+        )
+        user.set_password(validated_data['password'])
+        user.save()
+        return user
