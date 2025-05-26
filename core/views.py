@@ -1,3 +1,7 @@
+import base64
+import requests
+import numpy as np
+import re
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
 from datetime import datetime, timedelta
@@ -8,13 +12,14 @@ from django.http import JsonResponse
 from .filters import LeituraOCRFilter
 from .models import Ambiente, Aparelho, HistoricoConsumo, Estado, Bandeira, TarifaSocial, ConsumoMensal, LeituraOCR
 from django.db.models import Sum
-from rest_framework import viewsets, generics, status
+from rest_framework import viewsets, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action, api_view
 from .serializers import (
     AmbienteSerializer, EstadoSerializer,
     BandeiraSerializer, AparelhoSerializer,
-    HistoricoConsumoSerializer, ConsumoMensalSerializer, LeituraOCRSerializer
+    HistoricoConsumoSerializer, ConsumoMensalSerializer, LeituraOCRSerializer,
+
 )
 from decimal import Decimal
 from django.views.decorators.csrf import csrf_exempt
@@ -27,6 +32,10 @@ from rest_framework.parsers import MultiPartParser, FormParser
 import pytesseract
 from PIL import Image
 from django_filters.rest_framework import DjangoFilterBackend
+import cv2
+#from django.contrib.auth import get_user_model
+#from rest_framework_simplejwt.views import TokenObtainPairView
+
 
 # Configuração da API Gemini
 genai.configure(api_key=settings.GEMINI_API_KEY)
@@ -46,7 +55,7 @@ class BandeiraViewSet(viewsets.ModelViewSet):
     queryset = Bandeira.objects.all()
     serializer_class = BandeiraSerializer
 
-
+#------------------Aparelho------------------#
 class AparelhoViewSet(viewsets.ModelViewSet):
     queryset = Aparelho.objects.all().select_related('ambiente', 'estado', 'bandeira')
     serializer_class = AparelhoSerializer
@@ -69,7 +78,6 @@ class HistoricoConsumoViewSet(viewsets.ModelViewSet):
     serializer_class = HistoricoConsumoSerializer
     filterset_fields = ['data', 'ambiente']
 
-#------------------Aparelho------------------#
 class CalculoConsumoAPIView(APIView):
     def post(self, request):
         try:
@@ -431,70 +439,9 @@ def dicas_economia(request):
 
 #---------Medidor----------#
 
-@api_view(['GET', 'POST'])
-def consumo_mensal_view(request):
-    if request.method == 'POST':
-        dados = request.data
-
-        data_registro = dados.get('data')
-        if not data_registro:
-            return Response({'error': 'Campo data é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            data_dt = datetime.strptime(data_registro, '%Y-%m-%d')
-            ano = data_dt.year
-            mes = data_dt.month
-        except Exception:
-            return Response({'error': 'Formato da data inválido. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        leitura_inicial = dados.get('leitura_inicial')
-        leitura_final = dados.get('leitura_final')
-        try:
-            leitura_inicial = Decimal(leitura_inicial)
-            leitura_final = Decimal(leitura_final)
-        except Exception:
-            return Response({'error': 'Leituras inválidas.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if leitura_final < leitura_inicial:
-            return Response({'error': 'Leitura final não pode ser menor que inicial.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            estado = Estado.objects.get(id=dados.get('estado'))
-            bandeira = Bandeira.objects.get(id=dados.get('bandeira'))
-        except (Estado.DoesNotExist, Bandeira.DoesNotExist):
-            return Response({'error': 'Estado ou Bandeira inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        tarifa_social = dados.get('tarifa_social', False)
-
-        consumo = ConsumoMensal(
-            ano=ano,
-            mes=mes,
-            estado=estado,
-            bandeira=bandeira,
-            tarifa_social=tarifa_social,
-            leitura_inicial=leitura_inicial,
-            leitura_final=leitura_final
-        )
-        consumo.save()
-
-        serializer = ConsumoMensalSerializer(consumo)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-    # GET - lista todos os consumos ordenados
-    consumos = ConsumoMensal.objects.all().order_by('-ano', '-mes')
-    serializer = ConsumoMensalSerializer(consumos, many=True)
-    return Response(serializer.data)
-
-
-@csrf_exempt
-def deletar_consumo_mensal(request, pk):
-    if request.method == 'POST':
-        try:
-            consumo = ConsumoMensal.objects.get(pk=pk)
-            consumo.delete()
-            return JsonResponse({'status': 'success'})
-        except ConsumoMensal.DoesNotExist:
-            return JsonResponse({'status': 'not_found'}, status=404)
-    return JsonResponse({'status': 'invalid'}, status=400)
+class ConsumoMensalViewSet(viewsets.ModelViewSet):
+    queryset = ConsumoMensal.objects.all().order_by('-ano', '-mes')
+    serializer_class = ConsumoMensalSerializer
 
 @api_view(['GET'])
 def resultados_contador(request):
@@ -508,14 +455,14 @@ def resultados_contador(request):
             ano_int = int(ano)
             registros = registros.filter(ano=ano_int)
         except ValueError:
-            pass  # Ignora filtro inválido
+            pass
 
     if mes:
         try:
             mes_int = int(mes)
             registros = registros.filter(mes=mes_int)
         except ValueError:
-            pass  # Ignora filtro inválido
+            pass
 
     registros = registros.order_by('-ano', '-mes')
     serializer = ConsumoMensalSerializer(registros, many=True)
@@ -536,19 +483,33 @@ def resultados_contador(request):
     })
 
 
+# Gráfico por mês
 @api_view(['GET'])
 def grafico_contador(request):
-    # Buscar todos os registros do consumo mensal
     registros = ConsumoMensal.objects.all().order_by('ano', 'mes')
-
-    # Criar as labels para o gráfico no formato MM/AAAA
     labels = [f"{r.mes:02d}/{r.ano}" for r in registros]
-
-    # Extrair o consumo mensal (kWh) e o total pago (R$)
     consumos = [float(r.consumo_kwh or 0) for r in registros]
     custos = [float(r.total_pagar or 0) for r in registros]
 
-    # Retornar os dados formatados para o frontend
+    return Response({
+        'labels': labels,
+        'consumos': consumos,
+        'custos': custos,
+    })
+
+
+# Gráfico por ano
+@api_view(['GET'])
+def grafico_contador_anual(request):
+    registros = ConsumoMensal.objects.values('ano').annotate(
+        consumo_anual=Sum('consumo_kwh'),
+        custo_anual=Sum('total_pagar')
+    ).order_by('ano')
+
+    labels = [str(r['ano']) for r in registros]
+    consumos = [float(r['consumo_anual'] or 0) for r in registros]
+    custos = [float(r['custo_anual'] or 0) for r in registros]
+
     return Response({
         'labels': labels,
         'consumos': consumos,
@@ -580,7 +541,128 @@ class OCRView(APIView):
             return Response({'error': 'Nenhuma imagem enviada.'}, status=400)
         try:
             image = Image.open(imagem_file)
-            texto = pytesseract.image_to_string(image, lang='por')
-            return Response({'texto': texto})
+            img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+
+            alpha = 1.5
+            beta = 0
+            adjusted = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
+
+            _, thresh = cv2.threshold(adjusted, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            dilated = cv2.dilate(thresh, kernel, iterations=1)
+
+            custom_config = r'--oem 3 --psm 6 outputbase digits'
+            texto_ocr = pytesseract.image_to_string(dilated, config=custom_config, lang='por')
+
+            numeros = re.findall(r'\d{4,7}', texto_ocr)
+
+            if not numeros:
+                return Response({'error': 'Nenhum número válido encontrado no OCR.', 'texto': texto_ocr}, status=200)
+
+            valor = max(numeros, key=len)
+
+            return Response({'valor': int(valor), 'texto': texto_ocr}, status=200)
+
         except Exception as e:
             return Response({'error': f'Erro ao processar imagem: {str(e)}'}, status=500)
+
+#--------------------------------------------------------------------------------------------#
+GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyClP7PDzQR6AYg1hH7RZoNiZ-reoiQrNrs'
+
+
+class OCRGeminiView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request, *args, **kwargs):
+        try:
+            # Validação da imagem
+            imagem_file = request.data.get('imagem')
+            if not imagem_file:
+                return Response({'error': 'Nenhuma imagem enviada.'}, status=400)
+
+            if imagem_file.size > 4 * 1024 * 1024:  # 4MB max
+                return Response({'error': 'Imagem muito grande. Tamanho máximo: 4MB.'}, status=400)
+
+            # Converter imagem para base64
+            imagem_b64 = base64.b64encode(imagem_file.read()).decode('utf-8')
+
+            # Estrutura da requisição para Gemini 2.0 Flash
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": "Extraia apenas o número do medidor de energia (em kWh) desta imagem. Retorne somente o número encontrado."},
+                            {
+                                "inline_data": {
+                                    "mime_type": imagem_file.content_type,
+                                    "data": imagem_b64
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "topP": 0.9,
+                    "topK": 32,
+                    "maxOutputTokens": 100,
+                    "stopSequences": []
+                },
+                "safetySettings": [
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_NONE"
+                    }
+                ]
+            }
+
+            headers = {"Content-Type": "application/json"}
+
+            # Chamada para API Gemini
+            response = requests.post(GEMINI_ENDPOINT, headers=headers, json=payload)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Processamento da resposta
+            texto_gerado = data['candidates'][0]['content']['parts'][0]['text'].strip()
+
+            # Extrair apenas números (ajuste o regex conforme necessário)
+            numero_medidor = re.search(r'\d{4,7}', texto_gerado)
+            if not numero_medidor:
+                return Response({
+                    'error': 'Nenhum número de medidor encontrado.',
+                    'texto_ia': texto_gerado
+                }, status=200)
+
+            return Response({
+                'valor': int(numero_medidor.group()),
+                'texto_ia': texto_gerado
+            })
+
+        except requests.exceptions.RequestException as e:
+            return Response({
+                'error': 'Erro na comunicação com a API Gemini',
+                'details': str(e.response.text) if hasattr(e, 'response') else str(e)
+            }, status=500)
+
+        except Exception as e:
+            return Response({
+                'error': 'Erro interno no processamento',
+                'details': str(e)
+            }, status=500)
+
+#----------------------Login_Cadastro------------------#
+#User = get_user_model()
+
+#class RegisterView(generics.CreateAPIView):
+#    queryset = User.objects.all()
+#    serializer_class = RegisterSerializer
+#    permission_classes = [permissions.AllowAny]
+
+#class CustomTokenView(TokenObtainPairView):
+#    serializer_class = CustomTokenObtainPairSerializer

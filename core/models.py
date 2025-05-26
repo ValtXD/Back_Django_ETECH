@@ -2,6 +2,7 @@ from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
+from django.contrib.auth.models import AbstractUser
 from decimal import Decimal, ROUND_HALF_UP
 
 User = get_user_model()
@@ -397,8 +398,8 @@ class ConsumoMensal(models.Model):
 class LeituraOCR(models.Model):
     valor_extraido = models.DecimalField(max_digits=10, decimal_places=2)
     valor_corrigido = models.DecimalField(max_digits=10, decimal_places=2)
-    estado = models.ForeignKey(Estado, on_delete=models.PROTECT)
-    bandeira = models.ForeignKey(Bandeira, on_delete=models.PROTECT)
+    estado = models.ForeignKey('Estado', on_delete=models.PROTECT)
+    bandeira = models.ForeignKey('Bandeira', on_delete=models.PROTECT)
     tarifa_social = models.BooleanField(default=False)
     data_registro = models.DateTimeField(auto_now_add=True)
     imagem = models.ImageField(upload_to='leituras_imagens/')
@@ -406,12 +407,12 @@ class LeituraOCR(models.Model):
     consumo_entre_leituras = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     def custo_total(self):
-        if self.consumo_entre_leituras is None:
+        if self.valor_corrigido is None or self.estado is None or self.bandeira is None:
             return None
 
         tarifa = float(self.estado.tarifa.valor_kwh)
         adicional = float(self.bandeira.valor_adicional)
-        consumo = float(self.consumo_entre_leituras)
+        consumo = float(self.valor_corrigido)  # usa valor_corrigido, não consumo_entre_leituras
 
         custo_bruto = consumo * (tarifa + adicional)
 
@@ -425,8 +426,6 @@ class LeituraOCR(models.Model):
         return round(custo_liquido, 2)
 
     def _obter_desconto_tarifa_social(self, consumo_kwh: float) -> float:
-        """Busca a faixa correta da tarifa social baseada no consumo."""
-
         faixa = None
         if consumo_kwh <= 30:
             faixa = 'ate_30'
@@ -445,3 +444,14 @@ class LeituraOCR(models.Model):
 
     def __str__(self):
         return f"Leitura {self.valor_corrigido} kWh em {self.data_registro.date()}"
+
+    #--------------------------Login_Cadastro-------------------#
+
+#    class CustomUser(AbstractUser):
+#        email = models.EmailField(unique=True)
+
+#        USERNAME_FIELD = 'username'
+#        REQUIRED_FIELDS = ['email']
+
+#        def __str__(self):
+#            return self.username
