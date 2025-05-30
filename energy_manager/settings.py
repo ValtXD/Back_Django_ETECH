@@ -154,7 +154,8 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:4200',
-    'http://192.168.0.4:4200', #Em relação ao Celular
+    'http://192.168.0.4:4200', #Em relação ao Celular (Mi Casa)
+    'http://10.31.2.225:4200', #Em relação ao Celular (Etech)
 ]
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -162,7 +163,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.0.4']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '192.168.0.4', '10.31.2.225']
 
 #--------------Cadastro_Login-------------#
 #AUTH_USER_MODEL = 'core.CustomUser'

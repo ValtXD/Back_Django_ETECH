@@ -1,5 +1,8 @@
 import base64
+import os
 import requests
+import traceback
+import unicodedata
 import numpy as np
 import re
 from django.shortcuts import render, redirect, get_object_or_404
@@ -35,6 +38,11 @@ from PIL import Image
 from django_filters.rest_framework import DjangoFilterBackend
 import cv2
 from django.contrib.auth.models import User
+import openpyxl
+from docx import Document
+import pandas as pd
+from django.http import HttpResponseNotFound
+from django.http import FileResponse
 #from django.contrib.auth import get_user_model
 #from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -668,8 +676,361 @@ class OCRGeminiView(APIView):
 #class CustomTokenView(TokenObtainPairView):
 #    serializer_class = CustomTokenObtainPairSerializer
 
-#-------------------Login-Cadastro-Django--------------#
+#-------------------Login-Cadastro-Django--------------# Erro
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (permissions.AllowAny,)
     serializer_class = UserSerializer
+
+#-------------------Leitura_Documento------------------#
+
+def normalize_str(s):
+    s = s.lower()
+    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    s = s.replace(' ', '')
+    return s
+
+
+class ProcessarDocumentoAPIView(APIView):
+    parser_classes = [MultiPartParser]
+
+    def post(self, request, format=None):
+        try:
+            arquivo = request.FILES.get('arquivo')
+            if not arquivo:
+                return Response({"error": "Nenhum arquivo enviado."}, status=status.HTTP_400_BAD_REQUEST)
+
+            nome = arquivo.name.lower()
+            erros = []
+            dados = []
+            tipo = None
+
+            if nome.endswith('.xlsx') or nome.endswith('.xls'):
+                dados, tipo, erros = self.processar_excel(arquivo)
+            elif nome.endswith('.docx'):
+                dados, tipo, erros = self.processar_word(arquivo)
+            else:
+                return Response({"error": "Formato de arquivo não suportado."}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({
+                "tipo": tipo,
+                "dados": dados,
+                "erros": erros
+            })
+
+        except Exception as e:
+            traceback.print_exc()  # Mostra erro detalhado no console Django
+            return Response({"error": f"Erro interno no servidor: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def processar_excel(self, arquivo):
+        df = pd.read_excel(arquivo)
+
+        colunas = [normalize_str(str(c)) for c in df.columns]
+        colunas_set = set(colunas)
+
+        aparelho_cols = {'aparelho', 'potencia(w)', 'horaspordia'}
+        contador_cols = {'data', 'leituradomes(kwh)'}
+
+        if aparelho_cols.issubset(colunas_set):
+            return self.validar_aparelho_excel(df), 'aparelho', []
+        elif contador_cols.issubset(colunas_set):
+            return self.validar_contador_excel(df), 'contador', []
+        else:
+            raise ValueError("Colunas não correspondem a Aparelho ou Contador.")
+
+    def validar_aparelho_excel(self, df):
+        resultados = []
+        erros = []
+
+        col_map = {normalize_str(col): col for col in df.columns}
+
+        for i, row in df.iterrows():
+            aparelho = str(row[col_map.get('aparelho')]).strip() if col_map.get('aparelho') else ''
+            potencia = row[col_map.get('potencia(w)')] if col_map.get('potencia(w)') else None
+            horas = row[col_map.get('horaspordia')] if col_map.get('horaspordia') else None
+
+            linha = i + 2
+            if not aparelho:
+                erros.append(f"Linha {linha}: Campo 'Aparelho' vazio.")
+            if not self.is_number(potencia):
+                erros.append(f"Linha {linha}: Potência inválida.")
+            if not self.is_number(horas):
+                erros.append(f"Linha {linha}: Horas por dia inválido.")
+
+            resultados.append({
+                "aparelho": aparelho,
+                "potencia_w": potencia,
+                "horas_por_dia": horas
+            })
+
+        return resultados
+
+    def validar_contador_excel(self, df):
+        resultados = []
+        erros = []
+
+        col_map = {normalize_str(col): col for col in df.columns}
+
+        for i, row in df.iterrows():
+            data = row[col_map.get('data')] if col_map.get('data') else None
+            leitura = row[col_map.get('leituradomes(kwh)')] if col_map.get('leituradomes(kwh)') else None
+
+            linha = i + 2
+            if not self.is_valid_month(data):
+                erros.append(f"Linha {linha}: Data inválida (esperado formato mensal).")
+            if not self.is_number(leitura):
+                erros.append(f"Linha {linha}: Leitura do mês inválida.")
+
+            resultados.append({
+                "data": str(data),
+                "leitura_kwh": leitura
+            })
+
+        return resultados
+
+    def processar_word(self, arquivo):
+        doc = Document(arquivo)
+        linhas = []
+        for table in doc.tables:
+            for row in table.rows:
+                linhas.append([cell.text.strip() for cell in row.cells])
+
+        if not linhas:
+            raise ValueError("Documento Word sem tabelas ou vazio.")
+
+        cabecalho = [normalize_str(c) for c in linhas[0]]
+
+        if {'aparelho', 'potencia(w)', 'horaspordia'}.issubset(cabecalho):
+            return self.validar_aparelho_word(linhas), 'aparelho', []
+        elif {'data', 'leituradomes(kwh)'}.issubset(cabecalho):
+            return self.validar_contador_word(linhas), 'contador', []
+        else:
+            raise ValueError("Tabela do Word não corresponde a Aparelho nem Contador.")
+
+    def validar_aparelho_word(self, linhas):
+        resultados = []
+        erros = []
+
+        for i, linha in enumerate(linhas[1:], start=2):
+            try:
+                aparelho = linha[0]
+                potencia = linha[1]
+                horas = linha[2]
+            except IndexError:
+                erros.append(f"Linha {i}: Número insuficiente de colunas.")
+                continue
+
+            if not aparelho:
+                erros.append(f"Linha {i}: Campo 'Aparelho' vazio.")
+            if not self.is_number(potencia):
+                erros.append(f"Linha {i}: Potência inválida.")
+            if not self.is_number(horas):
+                erros.append(f"Linha {i}: Horas por dia inválido.")
+
+            resultados.append({
+                "aparelho": aparelho,
+                "potencia_w": potencia,
+                "horas_por_dia": horas
+            })
+
+        return resultados
+
+    def validar_contador_word(self, linhas):
+        resultados = []
+        erros = []
+
+        for i, linha in enumerate(linhas[1:], start=2):
+            try:
+                data = linha[0]
+                leitura = linha[1]
+            except IndexError:
+                erros.append(f"Linha {i}: Número insuficiente de colunas.")
+                continue
+
+            if not self.is_valid_month(data):
+                erros.append(f"Linha {i}: Data inválida (esperado formato mensal).")
+            if not self.is_number(leitura):
+                erros.append(f"Linha {i}: Leitura do mês inválida.")
+
+            resultados.append({
+                "data": str(data),
+                "leitura_kwh": leitura
+            })
+
+        return resultados
+
+    def is_number(self, valor):
+        try:
+            float(valor)
+            return True
+        except (ValueError, TypeError):
+            return False
+
+    def is_valid_month(self, data):
+        if not data:
+            return False
+        try:
+            if isinstance(data, str):
+                datetime.strptime(data, "%Y-%m")
+                return True
+            elif hasattr(data, "month") and hasattr(data, "year"):
+                return True
+            else:
+                return False
+        except:
+            return False
+
+    def calcular_custo_aparelho(self, potencia_w, horas_por_dia, tarifa_valor_kwh, tarifa_social_ativa):
+        consumo_mensal_kwh = (potencia_w * horas_por_dia * 30) / 1000  # W para kW e 30 dias
+        custo_bruto = consumo_mensal_kwh * tarifa_valor_kwh
+
+        if tarifa_social_ativa:
+            desconto = self.obter_desconto_tarifa_social(consumo_mensal_kwh)
+            custo_liquido = custo_bruto * (1 - desconto / 100)
+            return round(consumo_mensal_kwh, 2), round(custo_liquido, 2)
+        else:
+            return round(consumo_mensal_kwh, 2), round(custo_bruto, 2)
+
+    def calcular_custo_contador(self, leitura_kwh, tarifa_valor_kwh, tarifa_social_ativa):
+        custo_bruto = leitura_kwh * tarifa_valor_kwh
+
+        if tarifa_social_ativa:
+            desconto = self.obter_desconto_tarifa_social(leitura_kwh)
+            custo_liquido = custo_bruto * (1 - desconto / 100)
+            return round(leitura_kwh, 2), round(custo_liquido, 2)
+        else:
+            return round(leitura_kwh, 2), round(custo_bruto, 2)
+
+    def obter_desconto_tarifa_social(self, consumo_kwh):
+        # Faixas típicas para desconto (exemplo)
+        if consumo_kwh <= 30:
+            return 65
+        elif consumo_kwh <= 100:
+            return 40
+        elif consumo_kwh <= 220:
+            return 10
+        else:
+            return 0
+
+class CalcularCustosDocumentoAPIView(APIView):
+    def post(self, request):
+        tipo = request.data.get('tipo')
+        dados = request.data.get('dados', [])
+        estado_id = request.data.get('estado_id')
+        bandeira_id = request.data.get('bandeira_id')
+        tarifa_social = request.data.get('tarifa_social', False)
+
+        try:
+            estado = Estado.objects.get(id=estado_id)
+            bandeira = Bandeira.objects.get(id=bandeira_id)
+        except (Estado.DoesNotExist, Bandeira.DoesNotExist):
+            return Response({'error': 'Estado ou Bandeira inválidos.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        tarifa_base = estado.tarifa.valor_kwh
+        valor_bandeira = bandeira.valor_adicional
+        resultados = []
+
+        if tipo == 'contador':
+            # Ordenar os dados pela data para calcular consumo entre leituras consecutivas
+            dados_ordenados = sorted(dados, key=lambda x: x.get('data'))
+            # Consumir do item anterior para o atual
+            for i, item in enumerate(dados_ordenados):
+                leitura_atual = Decimal(item.get('leitura_kwh', 0))
+                data_atual = item.get('data')
+                if i == 0:
+                    # Para a primeira leitura não tem consumo (ou zero)
+                    consumo = Decimal('0')
+                else:
+                    leitura_anterior = Decimal(dados_ordenados[i-1].get('leitura_kwh', 0))
+                    consumo = leitura_atual - leitura_anterior
+                    if consumo < 0:
+                        consumo = Decimal('0')  # proteger contra leituras erradas que diminuem
+
+                custo_bruto = consumo * (tarifa_base + valor_bandeira)
+                if tarifa_social:
+                    desconto = self.obter_desconto_tarifa_social(consumo)
+                    custo_liquido = custo_bruto * (Decimal('1') - Decimal(desconto) / Decimal('100'))
+                else:
+                    custo_liquido = custo_bruto
+
+                resultados.append({
+                    'data': data_atual,
+                    'leitura_kwh': float(leitura_atual),
+                    'consumo': float(consumo),
+                    'custo_normal': float(custo_bruto),
+                    'custo_social': float(custo_liquido),
+                    'tarifa_social': tarifa_social,
+                })
+
+        elif tipo == 'aparelho':
+            for item in dados:
+                potencia = Decimal(item.get('potencia_w', 0))
+                horas = Decimal(item.get('horas_por_dia', 0))
+                quantidade = int(item.get('quantidade', 1) or 1)
+                consumo_mensal = (potencia * horas * quantidade * 30) / Decimal('1000')
+                custo_bruto = consumo_mensal * (tarifa_base + valor_bandeira)
+                if tarifa_social:
+                    desconto = self.obter_desconto_tarifa_social(consumo_mensal)
+                    custo_liquido = custo_bruto * (Decimal('1') - Decimal(desconto) / Decimal('100'))
+                else:
+                    custo_liquido = custo_bruto
+
+                resultados.append({
+                    'aparelho': item.get('aparelho'),
+                    'consumo_mensal_kwh': float(consumo_mensal),
+                    'custo_normal': float(custo_bruto),
+                    'custo_social': float(custo_liquido)
+                })
+
+        else:
+            return Response({'error': 'Tipo inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        total_consumo = sum(r.get('consumo_mensal_kwh', r.get('consumo', 0)) for r in resultados)
+        total_custo_normal = sum(r.get('custo_normal', 0) for r in resultados)
+        total_custo_social = sum(r.get('custo_social', 0) for r in resultados)
+
+        return Response({
+            'resultados': resultados,
+            'total_consumo': total_consumo,
+            'total_custo_normal': total_custo_normal,
+            'total_custo_social': total_custo_social,
+        })
+
+    def obter_desconto_tarifa_social(self, consumo_kwh):
+        if consumo_kwh <= 30:
+            return 65
+        elif consumo_kwh <= 100:
+            return 40
+        elif consumo_kwh <= 220:
+            return 10
+        else:
+            return 0
+
+#----------------Excel-Word (Leitura Documento)----------------#
+
+def baixar_template(request, tipo, formato):
+    if tipo == 'contador':
+        if formato == 'excel':
+            template_path = os.path.join(settings.MEDIA_ROOT, 'templates', 'contador.xlsx')
+            content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        elif formato == 'word':
+            template_path = os.path.join(settings.MEDIA_ROOT, 'templates', 'contador.docx')
+            content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        else:
+            return HttpResponseNotFound("Formato inválido.")
+    elif tipo == 'aparelho':
+        if formato == 'excel':
+            template_path = os.path.join(settings.MEDIA_ROOT, 'templates', 'aparelhos.xlsx')
+            content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        elif formato == 'word':
+            template_path = os.path.join(settings.MEDIA_ROOT, 'templates', 'aparelhos.docx')
+            content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        else:
+            return HttpResponseNotFound("Formato inválido.")
+    else:
+        return HttpResponseNotFound("Tipo inválido.")
+
+    if os.path.exists(template_path):
+        return FileResponse(open(template_path, 'rb'), content_type=content_type)
+    else:
+        return HttpResponseNotFound("Template não encontrado.")

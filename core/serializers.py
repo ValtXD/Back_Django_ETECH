@@ -25,10 +25,10 @@ class BandeiraSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-#class TarifaSerializer(serializers.ModelSerializer):
-#    class Meta:
-#        model = Tarifa
-#        fields = ['valor_kwh']
+class TarifaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tarifa
+        fields = ['valor_kwh']
 
 #-----------Aparelho------------#
 
@@ -211,7 +211,7 @@ class LeituraOCRSerializer(serializers.ModelSerializer):
 #        token['username'] = user.username
 #        return token
 
-#-------------------Login-Cadastro-Django--------------#
+#-------------------Login-Cadastro-Django--------------# Erro
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 
