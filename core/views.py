@@ -12,7 +12,8 @@ from rest_framework.views import APIView
 import json
 from django.http import JsonResponse
 
-from .filters import LeituraOCRFilter
+from . import filters
+from .filters import LeituraOCRFilter, AparelhoFilter, ConsumoMensalFilter
 from .models import Ambiente, Aparelho, HistoricoConsumo, Estado, Bandeira, TarifaSocial, ConsumoMensal, LeituraOCR
 from django.db.models import Sum
 from rest_framework import viewsets, generics, status, permissions
@@ -69,6 +70,8 @@ class BandeiraViewSet(viewsets.ModelViewSet):
 class AparelhoViewSet(viewsets.ModelViewSet):
     queryset = Aparelho.objects.all().select_related('ambiente', 'estado', 'bandeira')
     serializer_class = AparelhoSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = AparelhoFilter
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -452,11 +455,15 @@ def dicas_economia(request):
 class ConsumoMensalViewSet(viewsets.ModelViewSet):
     queryset = ConsumoMensal.objects.all().order_by('-ano', '-mes')
     serializer_class = ConsumoMensalSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = ConsumoMensalFilter
 
 @api_view(['GET'])
 def resultados_contador(request):
     ano = request.GET.get('ano')
     mes = request.GET.get('mes')
+    estado = request.GET.get('estado')
+    bandeira = request.GET.get('bandeira')
 
     registros = ConsumoMensal.objects.all()
 
@@ -471,6 +478,20 @@ def resultados_contador(request):
         try:
             mes_int = int(mes)
             registros = registros.filter(mes=mes_int)
+        except ValueError:
+            pass
+
+    if estado:
+        try:
+            estado_int = int(estado)
+            registros = registros.filter(estado_id=estado_int)
+        except ValueError:
+            pass
+
+    if bandeira:
+        try:
+            bandeira_int = int(bandeira)
+            registros = registros.filter(bandeira_id=bandeira_int)
         except ValueError:
             pass
 
@@ -491,7 +512,6 @@ def resultados_contador(request):
         'consumo_anual_estimado': consumo_anual_estimado,
         'custo_anual_estimado': custo_anual_estimado
     })
-
 
 # Gráfico por mês
 @api_view(['GET'])
