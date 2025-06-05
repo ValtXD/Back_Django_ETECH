@@ -230,7 +230,7 @@ class Aparelho(models.Model):
 
 
 class HistoricoConsumo(models.Model):
-    """Armazena o histórico de consumo por ambiente e data"""
+
     data = models.DateField(verbose_name="Data")
     ambiente = models.ForeignKey(
         Ambiente,
