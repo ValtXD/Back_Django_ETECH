@@ -1,6 +1,6 @@
 # core/serializers.py
 from rest_framework import serializers
-from .models import Ambiente, Estado, Bandeira, Aparelho, HistoricoConsumo, ConsumoMensal, LeituraOCR, Tarifa
+from .models import Ambiente, Estado, Bandeira, Aparelho, HistoricoConsumo, ConsumoMensal, LeituraOCR, Tarifa, AiTip, ApplianceAiTip
 from django.contrib.auth.models import User
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
@@ -227,3 +227,15 @@ class UserSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.save()
         return user
+
+#---------------------Registrador_IA_Contador-------------------#
+class AiTipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AiTip
+        fields = '__all__'
+
+#---------------------Registrador_IA_Aparelho-------------------#
+class ApplianceAiTipSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ApplianceAiTip
+        fields = '__all__'

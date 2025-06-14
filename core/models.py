@@ -455,3 +455,25 @@ class LeituraOCR(models.Model):
 
 #        def __str__(self):
 #            return self.username
+
+#---------------------Registrador_IA_Contador-------------------#
+
+class AiTip(models.Model):
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    # user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
+    # consumo_mensal = models.ForeignKey(ConsumoMensal, on_delete=models.SET_NULL, null=True, blank=True)
+
+    def __str__(self):
+        return self.text[:50]
+
+#---------------------Registrador_IA_Aparelho-------------------#
+
+class ApplianceAiTip(models.Model):
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    # user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
+    # aparelho = models.ForeignKey(Aparelho, on_delete=models.SET_NULL, null=True, blank=True) # Se quiser vincular a um aparelho específico
+
+    def __str__(self):
+        return f"Dica Aparelho: {self.text[:50]}"
