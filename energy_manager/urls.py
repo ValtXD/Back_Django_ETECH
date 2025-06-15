@@ -3,7 +3,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 #Esse core pode tá vermehlo, mas tá dando certo (pra mim)
 #Caso dê erro, verifique -> energy_manager.core.views (Depende do Interpretador)
-from core.views import AmbienteViewSet, EstadoViewSet, BandeiraViewSet, AparelhoViewSet, CalculoConsumoAPIView, ResultadosAPIView, monitoramento_api, dicas_economia, resultados_contador, grafico_contador, LeituraOCRViewSet, OCRView, grafico_contador_anual, ConsumoMensalViewSet, OCRGeminiView, RegisterView, ProcessarDocumentoAPIView, CalcularCustosDocumentoAPIView, baixar_template
+from core.views import AmbienteViewSet, EstadoViewSet, BandeiraViewSet, AparelhoViewSet, CalculoConsumoAPIView, ResultadosAPIView, monitoramento_api, dicas_economia, resultados_contador, grafico_contador, LeituraOCRViewSet, OCRView, grafico_contador_anual, ConsumoMensalViewSet, OCRGeminiView, RegisterView, ProcessarDocumentoAPIView, CalcularCustosDocumentoAPIView, baixar_template, AiTipListCreateView, AiTipDetailView, ApplianceAiTipListCreateView, ApplianceAiTipDetailView
 #from rest_framework_simplejwt.views import TokenRefreshView
 from django.conf import settings
 from django.conf.urls.static import static
@@ -67,8 +67,16 @@ urlpatterns = [
     path('api/processar-documento/', ProcessarDocumentoAPIView.as_view(), name='processar-documento'),
     path('api/calcular-custos/', CalcularCustosDocumentoAPIView.as_view(), name='calcular-custos'),
 
-    #API para Execl e Word (Leitura_Documento) -> Baixar Template
+    #API para Execel e Word (Leitura_Documento) -> Baixar Template
     path('baixar-template/<str:tipo>/<str:formato>/', baixar_template, name='baixar_template'),
+
+    #API para Registrar IA Contador
+    path('api/ai-tips/', AiTipListCreateView.as_view(), name='ai-tip-list-create'),
+    path('api/ai-tips/<int:pk>/', AiTipDetailView.as_view(), name='ai-tip-detail'),
+
+    #API para Registrar IA Aparelhos
+    path('api/appliance-ai-tips/', ApplianceAiTipListCreateView.as_view(), name='appliance-ai-tip-list-create'),
+    path('api/appliance-ai-tips/<int:pk>/', ApplianceAiTipDetailView.as_view(), name='appliance-ai-tip-detail'),
 
 ]
 

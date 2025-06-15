@@ -1,3 +1,12 @@
+#------------------------Migrações------------------------#
+Django Admin(IMPORTANTE):
+python manage.py importar_ambientes.py
+python manage.py importar_tarifas.py
+
+Models:
+python manage.py makemigrations
+python manage.py migrate
+
 #---------------MUDANÇAS pra teste(settings)--------------#
 
 DATABASES = {
@@ -17,7 +26,7 @@ OBSERVAÇÃO: Verifique se seu Interpretador está na .venv correta (Python da v
 
 #----------------Ideias de Telas----------------#
 
-Front-end(Meninas)
+Front-end -> (Meninas)
 
 Configurações -> Perfil (Opcional) / Modo Escuro e Branco / FAQ / Ajuda (Contatos)
 

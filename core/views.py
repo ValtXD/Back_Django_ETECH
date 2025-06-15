@@ -12,9 +12,11 @@ from rest_framework.views import APIView
 import json
 from django.http import JsonResponse
 
+
 from . import filters
 from .filters import LeituraOCRFilter, AparelhoFilter, ConsumoMensalFilter
 from .models import Ambiente, Aparelho, HistoricoConsumo, Estado, Bandeira, TarifaSocial, ConsumoMensal, LeituraOCR
+
 from django.db.models import Sum
 from rest_framework import viewsets, generics, status, permissions
 from rest_framework.response import Response
@@ -23,7 +25,7 @@ from .serializers import (
     AmbienteSerializer, EstadoSerializer,
     BandeiraSerializer, AparelhoSerializer,
     HistoricoConsumoSerializer, ConsumoMensalSerializer, LeituraOCRSerializer,
-    UserSerializer,
+    UserSerializer, AiTipSerializer, AiTipSerializer, ApplianceAiTipSerializer,
 
 )
 from decimal import Decimal
@@ -1077,3 +1079,23 @@ def baixar_template(request, tipo, formato):
         return FileResponse(open(template_path, 'rb'), content_type=content_type)
     else:
         return HttpResponseNotFound("Template não encontrado.")
+
+#---------------------Registrador_IA_Contador-------------------#
+
+class AiTipListCreateView(generics.ListCreateAPIView):
+    queryset = AiTip.objects.all().order_by('-created_at')
+    serializer_class = AiTipSerializer
+
+class AiTipDetailView(generics.RetrieveDestroyAPIView):
+    queryset = AiTip.objects.all()
+    serializer_class = AiTipSerializer
+
+#---------------------Registrador_IA_Aparelhos-------------------#
+
+class ApplianceAiTipListCreateView(generics.ListCreateAPIView):
+    queryset = ApplianceAiTip.objects.all().order_by('-created_at')
+    serializer_class = ApplianceAiTipSerializer
+
+class ApplianceAiTipDetailView(generics.RetrieveDestroyAPIView):
+    queryset = ApplianceAiTip.objects.all()
+    serializer_class = ApplianceAiTipSerializer
