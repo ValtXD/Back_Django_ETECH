@@ -151,40 +151,63 @@ class CalculoConsumoAPIView(APIView):
 
 
 class ResultadosAPIView(generics.ListAPIView):
+    """
+    API View que retorna uma lista de aparelhos e os totais de consumo
+    agregados até uma data específica.
+    """
     serializer_class = AparelhoSerializer
 
     def get_queryset(self):
-        # Obter todas as datas distintas com aparelhos cadastrados
-        datas_disponiveis = Aparelho.objects.dates('data_cadastro', 'day').order_by('-data_cadastro')
+        """
+        Filtra o queryset para retornar todos os aparelhos cadastrados
+        em ou antes (lte) da data especificada na URL.
+        """
+        data_selecionada_str = self.request.query_params.get('data')
+        data_obj = None
 
-        # Data selecionada (padrão: mais recente)
-        data_selecionada = self.request.query_params.get('data')
-        if not data_selecionada and datas_disponiveis:
-            data_selecionada = datas_disponiveis[0].strftime('%Y-%m-%d')
-
-        # Processar aparelhos da data selecionada
-        if data_selecionada:
+        if data_selecionada_str:
+            # Se uma data foi enviada na URL, usa ela
             try:
-                data_obj = datetime.strptime(data_selecionada, '%Y-%m-%d').date()
-                return Aparelho.objects.filter(data_cadastro=data_obj).select_related('ambiente', 'estado', 'bandeira')
+                data_obj = datetime.strptime(data_selecionada_str, '%Y-%m-%d').date()
             except ValueError:
+                # Se o formato da data for inválido, não retorna nada
                 return Aparelho.objects.none()
+        else:
+            # Se nenhuma data foi enviada, pega a data mais recente com cadastros
+            data_obj = Aparelho.objects.dates('data_cadastro', 'day', order='DESC').first()
+
+        if data_obj:
+            # PONTO CRÍTICO: O filtro foi alterado de '=' para '__lte'
+            return Aparelho.objects.filter(data_cadastro__lte=data_obj).select_related('ambiente', 'estado', 'bandeira')
+
+        # Se não houver data válida ou nenhum aparelho cadastrado, retorna vazio
         return Aparelho.objects.none()
 
     def list(self, request, *args, **kwargs):
+        """
+        Sobrescreve o método list para adicionar os totais e as datas
+        disponíveis no response da API.
+        """
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
 
-        # Calcular totais
-        consumo_total_dia = sum(a.consumo_diario_kwh for a in queryset)
-        custo_total_normal = sum(a.custo_diario for a in queryset)
-        custo_total_social = sum(a.custo_social_diario for a in queryset)
+        # A lógica para calcular totais agora funciona sobre o queryset filtrado por 'lte'
+        # Assumindo que seu modelo Aparelho tem estes campos/propriedades
+        consumo_total_dia = sum(a.consumo_diario_kwh for a in queryset if hasattr(a, 'consumo_diario_kwh'))
+        custo_total_normal = sum(a.custo_diario for a in queryset if hasattr(a, 'custo_diario'))
+        custo_total_social = sum(a.custo_social_diario for a in queryset if hasattr(a, 'custo_social_diario'))
 
-        # Obter datas disponíveis para o filtro
+        # Obter todas as datas únicas com cadastros para o dropdown no frontend
         datas_disponiveis = Aparelho.objects.dates('data_cadastro', 'day').order_by('-data_cadastro')
 
+        # Determina qual data foi efetivamente usada para o filtro
+        data_usada_str = request.query_params.get('data')
+        if not data_usada_str and datas_disponiveis:
+             data_usada_str = datas_disponiveis[0].strftime('%Y-%m-%d')
+
+
         response_data = {
-            'data_selecionada': request.query_params.get('data'),
+            'data_selecionada': data_usada_str,
             'aparelhos': serializer.data,
             'consumo_total_dia': float(consumo_total_dia),
             'custo_total_normal': float(custo_total_normal),
