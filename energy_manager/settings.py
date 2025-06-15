@@ -14,8 +14,24 @@ from pathlib import Path
 
 import os
 
+from pathlib import Path
+import os
+
+from dotenv import load_dotenv
+
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
+import os
+from pathlib import Path
+from os.path import exists
+from dotenv import load_dotenv
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+banco_conf = os.path.join(BASE_DIR, 'banco.config')
+
+if exists(banco_conf):
+    load_dotenv(banco_conf)
 
 GEMINI_API_KEY = "AIzaSyClP7PDzQR6AYg1hH7RZoNiZ-reoiQrNrs"
 
@@ -91,11 +107,11 @@ WSGI_APPLICATION = 'energy_manager.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'energy_manager',
-        'USER': 'postgres',
-        'PASSWORD': '1303',
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'NAME': os.getenv('NAME', 'energy_db'),
+        'USER': os.getenv('USER', 'postgres'),
+        'PASSWORD': os.getenv('PASSWORD', '1303'),
+        'HOST': os.getenv('HOST', 'db'),  # IMPORTANTE: hostname do serviço do banco no docker-compose
+        'PORT': int(os.getenv('PORT', 5432)),
     }
 }
 
@@ -150,12 +166,17 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+
+
 CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:4200',
+    "http://localhost:8000",  # Django
+    "http://127.0.0.1:8000",  # Django
     'http://192.168.0.4:4200', #Em relação ao Celular (Mi Casa)
     'http://10.31.2.225:4200', #Em relação ao Celular (Etech)
+
 ]
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
